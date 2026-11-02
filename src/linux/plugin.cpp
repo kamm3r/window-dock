@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "backends.hpp"
+#include "app-picker.hpp"
 #include <obs-module.h>
 #include <obs-frontend-api.h>
 #include <QAction>
@@ -60,24 +61,49 @@ void addDock(const QString &id, const QString &name, bool wayland, const QString
         input->setToolTip("Use a separate app instance. Shell operators and pipes are not interpreted.");
         auto *buttons = new QHBoxLayout;
         auto *launch = new QPushButton("Launch app");
+        auto *pick = new QPushButton("Pick app");
+        pick->setEnabled(AppPicker::available());
+        pick->setToolTip("Hyprland: click here, then focus a desktop app. A new instance will be prepared for this dock.");
+        char *profilePath = obs_module_config_path(("app-profiles/" + id).toUtf8().constData());
+        auto *picker = new AppPicker(QString::fromUtf8(profilePath), content);
+        bfree(profilePath);
         auto *stop = new QPushButton("Stop app");
         stop->setEnabled(false);
-        buttons->addWidget(launch); buttons->addWidget(stop);
+        buttons->addWidget(pick); buttons->addWidget(launch); buttons->addWidget(stop);
         layout->addWidget(input); layout->addLayout(buttons);
         auto *dock = new NestedWaylandDock;
         layout->addWidget(dock, 1);
         QObject::connect(dock, &NestedWaylandDock::statusChanged, status, &QLabel::setText);
+        QObject::connect(pick, &QPushButton::clicked, content, [=] {
+            if (picker->isPicking()) {
+                picker->cancel(); status->setText("Selection cancelled.");
+            } else {
+                status->setText("Click or focus another desktop app within 30 seconds. Its new-instance command will appear here.");
+                picker->start();
+            }
+        });
+        QObject::connect(picker, &AppPicker::pickingChanged, content, [=](bool picking) {
+            pick->setText(picking ? "Cancel picking" : "Pick app");
+            launch->setEnabled(!picking && !dock->isRunning());
+            input->setEnabled(!picking && !dock->isRunning());
+        });
+        QObject::connect(picker, &AppPicker::failed, status, &QLabel::setText);
+        QObject::connect(picker, &AppPicker::selected, content,
+                         [=](const QString &command, const QString &name, const QString &notice) {
+            input->setText(command);
+            status->setText("Selected " + name + ". Click Launch app. " + notice);
+        });
         QObject::connect(launch, &QPushButton::clicked, content, [=] {
             QString error;
             status->setText("Starting app…");
             if (!dock->start(input->text(), &error)) { status->setText(error); return; }
-            launch->setEnabled(false); input->setEnabled(false); stop->setEnabled(true);
+            launch->setEnabled(false); input->setEnabled(false); stop->setEnabled(true); pick->setEnabled(false);
             for (auto &entry : entries) if (entry.id == id) entry.command = input->text();
             save();
         });
         QObject::connect(stop, &QPushButton::clicked, content, [=] {
             dock->stop();
-            launch->setEnabled(true); input->setEnabled(true); stop->setEnabled(false);
+            launch->setEnabled(true); input->setEnabled(true); stop->setEnabled(false); pick->setEnabled(AppPicker::available());
             status->setText("Stopped. Closing the compositor disconnects apps launched inside it.");
         });
         status->setText("Launch a native Wayland app here. Existing desktop windows cannot be imported.");

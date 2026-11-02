@@ -20,10 +20,21 @@ hands-on testing. The original Windows build has not been retested.
 1. Install the built `window-dock.so`, then restart OBS.
 2. Open **Tools → Window Dock — Linux**.
 3. Enter a dock name and choose **Launch Wayland app (interactive)**.
-4. Click **Add dock**. In the dock, enter an executable and arguments, for example
-   `weston-terminal`, and click **Launch app**.
+4. Click **Add dock**. On Hyprland, click **Pick app**, then click or focus a
+   desktop app within 30 seconds. Its launch command appears automatically; click
+   **Launch app** to open a new instance in the dock. Use **Cancel picking** to stop
+   selection. You can also enter a command manually, such as `weston-terminal`.
 5. Click the app area to use its mouse and keyboard. **Stop app** closes the
    compositor and disconnects its clients. Removing a dock stops its app, too.
+
+**Pick app** currently requires Hyprland and `hyprctl`. Other desktops retain
+manual command entry. The picker uses desktop launchers or the selected process's
+executable; it does not copy the running process's arguments, open files or URLs.
+Firefox and Chromium-based browsers get a separate persistent profile under the
+plugin configuration's `app-profiles/<dock-id>/` directory, plus appropriate
+new-instance/Wayland arguments. Existing tabs and logins are not copied. Other
+single-instance apps may still need their app-specific options; the detected
+command stays editable. Flatpak/sandboxed launchers may also require adjustments.
 
 Commands are parsed into an executable and arguments, without a shell: pipes,
 redirection, shell variables and `~` expansion are not interpreted. Use absolute
@@ -108,7 +119,9 @@ QT_QPA_PLATFORM=xcb ./build-linux/window-dock-tests
 ```
 
 The tests exercise a real Weston client and a separate Qt client process:
-failed launch cleanup, repeated launch/stop, socket cleanup, rendered pixels,
+desktop launcher parsing and field codes, quote/empty-argument round trips,
+separate browser profiles, user desktop-entry overrides, real Hyprland focus
+selection and cancellation, failed launch cleanup, repeated launch/stop, socket cleanup, rendered pixels,
 mouse clicks, typed text, resize delivery, and two independent nested docks.
 Xorg tests verify reparenting, resizing, original geometry restoration and client
 window destruction. Xorg tests skip on native Wayland; the Weston lifecycle test

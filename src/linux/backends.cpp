@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "backends.hpp"
+#include "app-picker.hpp"
 #include <QGuiApplication>
 #include <QQuickWindow>
 #include <QQuickWidget>
@@ -195,7 +196,7 @@ int NestedWaylandDock::surfaceCount() const { return state->toplevels.size(); }
 bool NestedWaylandDock::isRunning() const { return state->compositor != nullptr; }
 bool NestedWaylandDock::start(const QString &command, QString *error) {
     if (isRunning()) { *error = "Stop the current app before launching another."; return false; }
-    QStringList args = QProcess::splitCommand(command);
+    QStringList args = splitLaunchCommand(command);
     if (args.isEmpty()) { *error = "Enter an executable and optional arguments."; return false; }
     if (qEnvironmentVariableIsEmpty("XDG_RUNTIME_DIR")) {
         *error = "XDG_RUNTIME_DIR must be set for the nested Wayland socket."; return false;

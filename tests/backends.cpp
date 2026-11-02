@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "../src/linux/backends.hpp"
+#include "../src/linux/app-picker.hpp"
 #include <QApplication>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLineEdit>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -38,6 +41,86 @@ protected:
 class BackendTests : public QObject {
     Q_OBJECT
 private slots:
+    void launcherResolution() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString desktop = directory.filePath("org.example.Test.desktop");
+        QFile file(desktop);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("[Desktop Entry]\nType=Application\nName=Test App\nExec=\"/opt/Test App/bin/app\" --label %c %U %% %i\nIcon=test-icon\nStartupWMClass=fixture-app\n[Desktop Action Other]\nExec=wrong-app\n");
+        file.close();
+        const auto launch = resolveAppLaunch("fixture-app", {}, {directory.path()}, directory.filePath("profiles"));
+        QCOMPARE(launch.name, QString("Test App"));
+        QCOMPARE(launch.arguments, QStringList({"/opt/Test App/bin/app", "--label", "Test App", "%", "--icon", "test-icon"}));
+        QCOMPARE(splitLaunchCommand(launch.command()), launch.arguments);
+        AppLaunch quoted;
+        quoted.arguments = {"/path with spaces/app", "a\"b", "", "x\\y"};
+        QCOMPARE(splitLaunchCommand(quoted.command()), quoted.arguments);
+        const auto fallback = resolveAppLaunch("Unknown", "/usr/bin/true", {}, {});
+        QCOMPARE(fallback.arguments, QStringList({"/usr/bin/true"}));
+        QVERIFY(resolveAppLaunch("Unknown", "/not/an/executable", {}, {}).arguments.isEmpty());
+    }
+    void browserProfilesAndOverrides() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QDir().mkpath(directory.filePath("user"));
+        QDir().mkpath(directory.filePath("system"));
+        QFile firefox(directory.filePath("system/firefox.desktop"));
+        QVERIFY(firefox.open(QIODevice::WriteOnly));
+        firefox.write("[Desktop Entry]\nType=Application\nName=Firefox\nExec=firefox --profile /old/profile %U\n"); firefox.close();
+        const QStringList dirs{directory.filePath("user"), directory.filePath("system")};
+        const auto launch = resolveAppLaunch("firefox", {}, dirs, directory.filePath("profiles"));
+        QVERIFY(launch.arguments.contains("--new-instance"));
+        QVERIFY(!launch.arguments.contains("/old/profile"));
+        QCOMPARE(launch.profileDirectory, directory.filePath("profiles/firefox"));
+        QCOMPARE(splitLaunchCommand(launch.command()), launch.arguments);
+        QFile hidden(directory.filePath("user/firefox.desktop"));
+        QVERIFY(hidden.open(QIODevice::WriteOnly));
+        hidden.write("[Desktop Entry]\nHidden=true\n"); hidden.close();
+        QVERIFY(resolveAppLaunch("firefox", {}, dirs, {}).arguments.isEmpty());
+        QFile brave(directory.filePath("system/brave.desktop"));
+        QVERIFY(brave.open(QIODevice::WriteOnly));
+        brave.write("[Desktop Entry]\nType=Application\nName=Brave\nExec=brave-browser-stable --user-data-dir=/old --ozone-platform=x11 %U\n"); brave.close();
+        const auto chromium = resolveAppLaunch("brave", {}, dirs, directory.filePath("profiles"));
+        QVERIFY(chromium.arguments.contains("--ozone-platform=wayland"));
+        QVERIFY(!chromium.arguments.contains("--user-data-dir=/old"));
+        QVERIFY(chromium.arguments.contains("--user-data-dir=" + chromium.profileDirectory));
+    }
+    void pickerSelectsFocusedApp() {
+        if (!AppPicker::available()) QSKIP("Needs an active Hyprland session");
+        // Start a real native client with a distinct PID. The test process itself
+        // is ignored by the picker, exactly as OBS is ignored in production.
+        QTemporaryDir directory;
+        QProcess client;
+        auto env = QProcessEnvironment::systemEnvironment();
+        env.insert("QT_QPA_PLATFORM", "wayland");
+        client.setProcessEnvironment(env);
+        client.start(QCoreApplication::applicationFilePath(), {"--fixture", directory.filePath("picked")});
+        QVERIFY(client.waitForStarted());
+        QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(directory.filePath("picked.size")), 5000);
+        QProcess focus;
+        focus.start("hyprctl", {"dispatch", "focuswindow", "pid:" + QString::number(client.processId())});
+        QVERIFY(focus.waitForFinished(2000));
+        auto fixtureFocused = [&] {
+            QProcess active;
+            active.start("hyprctl", {"-j", "activewindow"});
+            if (!active.waitForFinished(1000)) return false;
+            return QJsonDocument::fromJson(active.readAllStandardOutput()).object().value("pid").toInteger() == client.processId();
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(fixtureFocused(), 5000);
+        AppPicker picker(directory.filePath("profiles"));
+        QSignalSpy selected(&picker, &AppPicker::selected);
+        QSignalSpy failed(&picker, &AppPicker::failed);
+        picker.start();
+        QTRY_VERIFY_WITH_TIMEOUT(!selected.isEmpty() || !failed.isEmpty(), 10000);
+        QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
+        QCOMPARE(splitLaunchCommand(selected.first().first().toString()).first(), QCoreApplication::applicationFilePath());
+        QVERIFY(!picker.isPicking());
+        client.terminate();
+        QVERIFY(client.waitForFinished());
+        picker.start(); picker.cancel();
+        QVERIFY(!picker.isPicking());
+    }
     void invalidCommand() {
         NestedWaylandDock dock;
         QString error;
