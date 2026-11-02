@@ -1,0 +1,6 @@
+/build*/
+/release*/
+/_CPack_Packages/
+/cmake/.CMakeBuildNumber
+/CMakeCache.txt
+/CMakeFiles/

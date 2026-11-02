@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.16...3.26)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR (UNIX AND NOT APPLE))
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/linux-plugin.cmake")
+  return()
+endif()
+
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCOPE)
 
 project(${_name} VERSION ${_version})
@@ -29,7 +34,7 @@ endif()
 
 if(ENABLE_QT)
   find_package(Qt6 REQUIRED COMPONENTS Widgets Core Gui Svg)
-  
+
   if(Qt6_FOUND)
     target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
     target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE -DENABLE_QT)
@@ -41,7 +46,7 @@ if(ENABLE_QT)
       PROPERTIES AUTOMOC ON
                  AUTOUIC ON
                  AUTORCC ON)
-                 
+
     qt_add_resources(RESOURCE_FILES /resources/resources.qrc)
 
   else()
